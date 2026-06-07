@@ -19,11 +19,20 @@ checkpoints/
 # Logs
 logs/
 
-# Results (generated)
+# Results (generated) — keep folder structure but ignore generated files
 results/*.jpg
 results/*.png
 results/*.html
 results/*.json
+results/*.md
+
+# Data (runtime generated)
+data/degraded/*.png
+data/enhanced/*.png
+
+# Matplotlib cache
+.matplotlib/
+.fontconfig/
 
 # IDE
 .vscode/

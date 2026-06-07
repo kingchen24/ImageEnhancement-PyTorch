@@ -1,6 +1,8 @@
 # ============================================================
-# 自动化评测平台
-# 功能: 批量图像处理 + 质量评估 + 对比可视化 + HTML报告
+# Automated Evaluation Platform / 自动化评测平台
+# Features / 功能: Batch processing + Quality assessment +
+#          Comparison visualization + Bilingual HTML/MD/JSON reports
+#          批量图像处理 + 质量评估 + 对比可视化 + 双语HTML/MD/JSON报告
 # ============================================================
 
 import os
@@ -17,54 +19,180 @@ from config import *
 from degradation import ImageDegradation
 from enhancement import ImageEnhancement
 from evaluation import ImageQualityMetrics
+from visualizer import Visualizer, L as VL
+
+
+# ==================== Bilingual Labels / 双语标签 ====================
+
+class L:
+    """i18n labels for reports / 报告双语标签"""
+
+    _DICT = {
+        # HTML/MD report / 报告标题
+        "report_title": {
+            "zh": "图像质量增强评测报告",
+            "en": "Image Quality Enhancement Evaluation Report"
+        },
+        "summary_title": {
+            "zh": "总体指标",
+            "en": "Summary"
+        },
+        "detail_title": {
+            "zh": "详细结果",
+            "en": "Detailed Results"
+        },
+        "generated_at": {
+            "zh": "生成时间",
+            "en": "Generated at"
+        },
+        "avg_psnr_gain": {
+            "zh": "PSNR 平均提升",
+            "en": "Avg PSNR Gain"
+        },
+        "avg_ssim_gain": {
+            "zh": "SSIM 平均提升",
+            "en": "Avg SSIM Gain"
+        },
+        "images_processed": {
+            "zh": "处理图像数",
+            "en": "Images Processed"
+        },
+        "avg_time": {
+            "zh": "平均处理时间",
+            "en": "Avg Processing Time"
+        },
+        "image_name": {
+            "zh": "图像",
+            "en": "Image"
+        },
+        "degraded_psnr": {
+            "zh": "退化 PSNR",
+            "en": "Degraded PSNR"
+        },
+        "enhanced_psnr": {
+            "zh": "增强 PSNR",
+            "en": "Enhanced PSNR"
+        },
+        "degraded_ssim": {
+            "zh": "退化 SSIM",
+            "en": "Degraded SSIM"
+        },
+        "enhanced_ssim": {
+            "zh": "增强 SSIM",
+            "en": "Enhanced SSIM"
+        },
+        "psnr_gain_col": {
+            "zh": "PSNR 提升",
+            "en": "PSNR Gain"
+        },
+        "ssim_gain_col": {
+            "zh": "SSIM 提升",
+            "en": "SSIM Gain"
+        },
+        "metric": {
+            "zh": "指标",
+            "en": "Metric"
+        },
+        "degraded_val": {
+            "zh": "退化图像",
+            "en": "Degraded"
+        },
+        "enhanced_val": {
+            "zh": "增强图像",
+            "en": "Enhanced"
+        },
+        "gain": {
+            "zh": "提升",
+            "en": "Gain"
+        },
+        "error_col": {
+            "zh": "错误",
+            "en": "Error"
+        },
+        "total": {
+            "zh": "总计",
+            "en": "Total"
+        },
+        "batch_header": {
+            "zh": "Batch Processing",
+            "en": "Batch Processing"
+        },
+        "images": {
+            "zh": "images",
+            "en": "images"
+        },
+        "degradation_configs": {
+            "zh": "Degradation configs",
+            "en": "Degradation configs"
+        },
+        "enhancement_method": {
+            "zh": "Enhancement method",
+            "en": "Enhancement method"
+        },
+        "type": {
+            "zh": "types",
+            "en": "types"
+        },
+        "processing": {
+            "zh": "Processing",
+            "en": "Processing"
+        },
+    }
+
+    @classmethod
+    def t(cls, key: str) -> str:
+        return cls._DICT.get(key, {}).get(LANG, key)
 
 
 class AutomatedEvaluator:
-    """自动化评测平台"""
+    """Automated Evaluation Platform / 自动化评测平台"""
 
     def __init__(self, model: Optional = None, device: str = 'cpu'):
         self.enhancer = ImageEnhancement(model, device)
         self.evaluator = ImageQualityMetrics()
         self.results = []
 
-    # -------------------- 单图处理 --------------------
+    # -------------------- Single Image / 单图处理 --------------------
     def process_single(self, img_path: str, degradation_config: dict,
                        enhance_method: str = "dl",
                        traditional_tasks: list = None) -> Dict:
-        """处理单张图像并记录所有中间结果"""
+        """Process single image & record all intermediate results
+        处理单张图像并记录所有中间结果"""
         img = imread(img_path, cv2.IMREAD_COLOR)
         if img is None:
             return {"error": f"Failed to read {img_path}"}
 
         name = os.path.splitext(os.path.basename(img_path))[0]
 
-        # 1. 退化
+        # 1. Degradation / 退化
         degraded, deg_meta = ImageDegradation.apply_degradation_pipeline(
             img, degradation_config
         )
 
-        # 2. 增强
+        # 2. Enhancement / 增强
         t_start = time.time()
         if enhance_method == "dl" and self.enhancer.model is not None:
             enhanced = self.enhancer.enhance_dl(degraded)
         elif enhance_method == "traditional" and traditional_tasks:
             enhanced = ImageEnhancement.enhance_pipeline(degraded, traditional_tasks)
         else:
-            enhanced = degraded  # 无增强
+            enhanced = degraded  # No enhancement / 无增强
         t_elapsed = time.time() - t_start
 
-        # 3. 评估
+        # 3. Evaluation / 评估
         metrics_degraded = self.evaluator.evaluate_all(img, degraded)
         metrics_enhanced = self.evaluator.evaluate_all(img, enhanced)
 
-        # 4. 计算提升百分比
+        # 4. Compute improvement percentages / 计算提升百分比
         improvements = {}
         for m in metrics_degraded:
             if m in metrics_enhanced and m not in ("lpips",):
                 v_before = metrics_degraded.get(m, 0)
                 v_after = metrics_enhanced.get(m, 0)
                 if v_before != 0:
-                    improvements[f"{m}_gain"] = round((v_after - v_before) / abs(v_before) * 100, 2)
+                    improvements[f"{m}_gain"] = round(
+                        (v_after - v_before) / abs(v_before) * 100, 2
+                    )
                 else:
                     improvements[f"{m}_gain"] = 0
 
@@ -81,12 +209,12 @@ class AutomatedEvaluator:
         self.results.append(result)
         return result
 
-    # -------------------- 批量处理 --------------------
+    # -------------------- Batch Processing / 批量处理 --------------------
     def process_batch(self, input_dir: str,
                       degradation_configs: List[Dict] = None,
                       enhance_method: str = "dl",
                       traditional_tasks: list = None) -> List[Dict]:
-        """批量处理并评估多张图像"""
+        """Batch process & evaluate multiple images / 批量处理并评估多张图像"""
         if degradation_configs is None:
             degradation_configs = [{
                 "gaussian_noise": {"enabled": True, "std": 25},
@@ -99,9 +227,9 @@ class AutomatedEvaluator:
                  if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
 
         print(f"\n{'='*60}")
-        print(f"  Batch Processing: {len(files)} images")
-        print(f"  Degradation configs: {len(degradation_configs)} types")
-        print(f"  Enhancement method: {enhance_method}")
+        print(f"  {L.t('batch_header')}: {len(files)} {L.t('images')}")
+        print(f"  {L.t('degradation_configs')}: {len(degradation_configs)} {L.t('type')}")
+        print(f"  {L.t('enhancement_method')}: {enhance_method}")
         print(f"{'='*60}\n")
 
         total = len(files) * len(degradation_configs)
@@ -111,7 +239,7 @@ class AutomatedEvaluator:
             path = os.path.join(input_dir, fname)
             for dcfg in degradation_configs:
                 count += 1
-                print(f"[{count}/{total}] Processing {fname} ...", end=" ")
+                print(f"[{count}/{total}] {L.t('processing')} {fname} ...", end=" ")
                 result = self.process_single(path, dcfg, enhance_method, traditional_tasks)
                 if "error" in result:
                     print(f"ERROR: {result['error']}")
@@ -121,9 +249,9 @@ class AutomatedEvaluator:
 
         return self.results
 
-    # -------------------- 汇总统计 --------------------
+    # -------------------- Summary / 汇总统计 --------------------
     def summary(self) -> Dict:
-        """生成汇总统计"""
+        """Generate summary statistics / 生成汇总统计"""
         if not self.results:
             return {"error": "No results"}
 
@@ -150,7 +278,7 @@ class AutomatedEvaluator:
             if e_vals:
                 summary["enhanced_avg"][key] = round(np.mean(e_vals), 4)
 
-        # 改善百分比
+        # Improvement percentages / 改善百分比
         for r in valid:
             for k, v in r.get("improvements", {}).items():
                 if k not in summary["improvements_avg"]:
@@ -162,17 +290,17 @@ class AutomatedEvaluator:
                 np.mean(summary["improvements_avg"][k]), 2
             )
 
-        # 平均处理时间
+        # Avg processing time / 平均处理时间
         summary["avg_processing_time"] = round(
             np.mean([r["processing_time"] for r in valid]), 3
         )
 
         return summary
 
-    # -------------------- HTML 报告 --------------------
+    # -------------------- Report Generation / 报告生成 --------------------
     def generate_report(self, output_dir: str = None,
                         format: str = "html") -> str:
-        """生成评测报告"""
+        """Generate evaluation report / 生成评测报告"""
         output_dir = output_dir or RESULTS_DIR
         os.makedirs(output_dir, exist_ok=True)
 
@@ -183,105 +311,288 @@ class AutomatedEvaluator:
         else:
             return self._generate_html(output_dir)
 
+    # ---- HTML Report / HTML 报告 ----
     def _generate_html(self, output_dir: str) -> str:
-        """生成HTML报告"""
+        """Generate bilingual HTML report / 生成双语HTML报告"""
         summary = self.summary()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(output_dir, f"report_{timestamp}.html")
 
-        # 构建数据行
+        # Build data rows / 构建数据行
         rows = ""
         for r in self.results:
             if "error" in r:
-                rows += f"<tr><td colspan='7'>Error: {r['error']}</td></tr>"
+                rows += f"<tr><td colspan='7' class='error'>{r['error']}</td></tr>"
                 continue
             md = r["metrics_degraded"]
             me = r["metrics_enhanced"]
+            imp = r.get("improvements", {})
+            psnr_g = imp.get("psnr_gain", "?")
+            ssim_g = imp.get("ssim_gain", "?")
+
+            # Color-coded gains / 颜色编码提升幅度
+            psnr_color = "gain-positive" if isinstance(psnr_g, (int, float)) and psnr_g > 0 else "gain-negative"
+            ssim_color = "gain-positive" if isinstance(ssim_g, (int, float)) and ssim_g > 0 else "gain-negative"
+
             rows += f"""
             <tr>
-              <td>{r['name']}</td>
+              <td class='img-name'>{r['name']}</td>
               <td>{md.get('psnr','?'):.2f}</td>
               <td>{me.get('psnr','?'):.2f}</td>
               <td>{md.get('ssim','?'):.4f}</td>
               <td>{me.get('ssim','?'):.4f}</td>
-              <td>{r.get('improvements',{}).get('psnr_gain','?')}%</td>
-              <td>{r.get('improvements',{}).get('ssim_gain','?')}%</td>
+              <td class='{psnr_color}'>{psnr_g}%</td>
+              <td class='{ssim_color}'>{ssim_g}%</td>
             </tr>"""
 
+        # Summary cards / 汇总卡片
+        imp_avg = summary.get("improvements_avg", {})
+        psnr_gain = imp_avg.get("psnr_gain", "N/A")
+        ssim_gain = imp_avg.get("ssim_gain", "N/A")
+
         html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{LANG}">
 <head>
 <meta charset="UTF-8">
-<title>图像增强评测报告</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{L.t('report_title')}</title>
 <style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ font-family:'Segoe UI',system-ui, sans-serif; background:#f4f6f9; color:#333; padding:40px 20px; }}
-.container {{ max-width:1200px; margin:0 auto; }}
-h1 {{ color:#1a73e8; border-bottom:3px solid #1a73e8; padding-bottom:10px; margin-bottom:30px; }}
-h2 {{ color:#444; margin:30px 0 15px; }}
-.card {{ background:#fff; border-radius:12px; padding:25px; margin-bottom:20px; box-shadow:0 2px 12px rgba(0,0,0,.08); }}
-.stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:15px; }}
-.stat {{ background:linear-gradient(135deg,#667eea,#764ba2); border-radius:10px; padding:20px; color:#fff; text-align:center; }}
-.stat.green {{ background:linear-gradient(135deg,#11998e,#38ef7d); }}
-.stat.blue {{ background:linear-gradient(135deg,#4facfe,#00f2fe); }}
-.stat .value {{ font-size:2em; font-weight:700; }}
-.stat .label {{ font-size:.85em; opacity:.9; margin-top:5px; }}
-table {{ width:100%; border-collapse:collapse; }}
-th, td {{ padding:12px 16px; text-align:center; border-bottom:1px solid #eee; }}
-th {{ background:#f8f9fa; font-weight:600; color:#555; }}
-tr:hover {{ background:#f0f4ff; }}
-.footer {{ margin-top:40px; text-align:center; color:#999; font-size:.85em; }}
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #f8fafc 50%, #f0fdf4 100%);
+    color: #1e293b;
+    padding: 40px 20px;
+    min-height: 100vh;
+  }}
+  .container {{ max-width: 1300px; margin:0 auto; }}
+
+  /* Header / 标题区 */
+  .header {{
+    text-align: center;
+    padding: 35px 30px;
+    background: linear-gradient(135deg, #1a73e8, #0d9488);
+    border-radius: 20px;
+    color: white;
+    margin-bottom: 30px;
+    box-shadow: 0 8px 32px rgba(26,115,232,0.2);
+  }}
+  .header h1 {{ font-size: 2em; margin-bottom: 8px; letter-spacing: -0.5px; }}
+  .header .subtitle {{ font-size: 0.95em; opacity: 0.9; }}
+
+  /* Summary Cards / 汇总卡片 */
+  .cards {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px;
+    margin-bottom: 30px;
+  }}
+  .card {{
+    background: white;
+    border-radius: 16px;
+    padding: 24px 20px;
+    text-align: center;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 1px solid #f1f5f9;
+  }}
+  .card:hover {{ transform: translateY(-3px); box-shadow: 0 8px 28px rgba(0,0,0,0.1); }}
+  .card .card-value {{ font-size: 2.4em; font-weight: 800; margin-bottom: 6px; }}
+  .card .card-label {{ font-size: 0.9em; color: #64748b; font-weight: 500; }}
+  .card.green .card-value {{ color: #0d9488; }}
+  .card.blue .card-value {{ color: #1a73e8; }}
+  .card.purple .card-value {{ color: #8b5cf6; }}
+  .card.amber .card-value {{ color: #f59e0b; }}
+
+  /* Section / 分区 */
+  .section {{
+    background: white;
+    border-radius: 16px;
+    padding: 28px 30px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.05);
+    border: 1px solid #f1f5f9;
+  }}
+  .section h2 {{
+    color: #1e293b;
+    font-size: 1.35em;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }}
+  .section h2 .icon {{ font-size: 1.2em; }}
+
+  /* Table / 表格 */
+  .table-wrap {{ overflow-x: auto; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.93em; }}
+  thead th {{
+    background: #f8fafc;
+    padding: 14px 16px;
+    text-align: center;
+    font-weight: 700;
+    color: #475569;
+    border-bottom: 2px solid #e2e8f0;
+    white-space: nowrap;
+    font-size: 0.88em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }}
+  tbody td {{
+    padding: 12px 16px;
+    text-align: center;
+    border-bottom: 1px solid #f1f5f9;
+  }}
+  tbody tr:hover {{ background: #f8fafc; }}
+  .img-name {{ font-weight: 600; color: #1a73e8; font-family: 'SF Mono', 'Consolas', monospace; font-size: 0.9em; }}
+  .gain-positive {{ color: #0d9488; font-weight: 700; }}
+  .gain-negative {{ color: #e74c3c; font-weight: 700; }}
+  .error {{ color: #e74c3c; font-style: italic; }}
+
+  /* Chart images / 图表嵌入 */
+  .chart-row {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+  }}
+  .chart-row img {{
+    width: 100%;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    border: 1px solid #f1f5f9;
+  }}
+
+  /* Footer / 页脚 */
+  .footer {{
+    text-align: center;
+    padding: 24px;
+    color: #94a3b8;
+    font-size: 0.88em;
+  }}
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>🔬 图像质量增强评测报告</h1>
 
-  <div class="card">
-    <h2>📊 总体指标</h2>
-    <div class="stats">
-      <div class="stat green">
-        <div class="value">{summary.get('improvements_avg',{}).get('psnr_gain','N/A')}%</div>
-        <div class="label">PSNR 平均提升</div>
-      </div>
-      <div class="stat blue">
-        <div class="value">{summary.get('improvements_avg',{}).get('ssim_gain','N/A')}%</div>
-        <div class="label">SSIM 平均提升</div>
-      </div>
-      <div class="stat">
-        <div class="value">{summary['total_images']}</div>
-        <div class="label">处理图像数</div>
-      </div>
-      <div class="stat">
-        <div class="value">{summary.get('avg_processing_time','N/A')}s</div>
-        <div class="label">平均处理时间</div>
-      </div>
+  <div class="header">
+    <h1>{L.t('report_title')}</h1>
+    <div class="subtitle">{L.t('generated_at')}: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>
+  </div>
+
+  <!-- Summary Cards / 汇总卡片 -->
+  <div class="cards">
+    <div class="card green">
+      <div class="card-value">{psnr_gain}%</div>
+      <div class="card-label">{L.t('avg_psnr_gain')}</div>
+    </div>
+    <div class="card blue">
+      <div class="card-value">{ssim_gain}%</div>
+      <div class="card-label">{L.t('avg_ssim_gain')}</div>
+    </div>
+    <div class="card purple">
+      <div class="card-value">{summary.get('total_images', 0)}</div>
+      <div class="card-label">{L.t('images_processed')}</div>
+    </div>
+    <div class="card amber">
+      <div class="card-value">{summary.get('avg_processing_time', 'N/A')}s</div>
+      <div class="card-label">{L.t('avg_time')}</div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>📋 详细结果</h2>
+  <!-- Summary Table / 汇总表 -->
+  <div class="section">
+    <h2><span class="icon">📊</span> {L.t('summary_title')}</h2>
+    <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>图像</th>
-          <th>退化 PSNR</th>
-          <th>增强 PSNR</th>
-          <th>退化 SSIM</th>
-          <th>增强 SSIM</th>
-          <th>PSNR 提升</th>
-          <th>SSIM 提升</th>
+          <th>{L.t('metric')}</th>
+          <th>{L.t('degraded_val')}</th>
+          <th>{L.t('enhanced_val')}</th>
+          <th>{L.t('gain')}</th>
+        </tr>
+      </thead>
+      <tbody>
+"""
+        improvements = summary.get("improvements_avg", {})
+        for k in summary.get("degraded_avg", {}):
+            d_val = summary["degraded_avg"][k]
+            e_val = summary["enhanced_avg"].get(k, "-")
+            gain = improvements.get(f"{k}_gain", "-")
+            gain_str = f"{gain}%" if isinstance(gain, (int, float)) else gain
+            html += f"""
+        <tr>
+          <td style="font-weight:600;">{k.upper()}</td>
+          <td>{d_val:.4f}</td>
+          <td>{e_val:.4f}</td>
+          <td class="gain-positive">{gain_str}</td>
+        </tr>"""
+
+        html += f"""
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- Detailed Results / 详细结果 -->
+  <div class="section">
+    <h2><span class="icon">📋</span> {L.t('detail_title')}</h2>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>{L.t('image_name')}</th>
+          <th>{L.t('degraded_psnr')}</th>
+          <th>{L.t('enhanced_psnr')}</th>
+          <th>{L.t('degraded_ssim')}</th>
+          <th>{L.t('enhanced_ssim')}</th>
+          <th>{L.t('psnr_gain_col')}</th>
+          <th>{L.t('ssim_gain_col')}</th>
         </tr>
       </thead>
       <tbody>
         {rows}
       </tbody>
     </table>
+    </div>
+  </div>
+
+  <!-- Charts Section / 可视化图表 -->
+  <div class="section">
+    <h2><span class="icon">📈</span> Visualization / 可视化</h2>
+    <div class="chart-row">
+"""
+
+        # Embed chart images if they exist / 嵌入存在的图表
+        chart_files = [
+            ("dashboard.png", "Dashboard / 仪表盘"),
+            ("metrics_comparison.png", "Metrics Comparison / 指标对比"),
+            ("radar_chart.png", "Radar Chart / 雷达图"),
+            ("gain_bars.png", "Gain Bars / 提升幅度"),
+            ("per_image_metrics.png", "Per-Image Metrics / 逐图指标"),
+            ("time_distribution.png", "Time Distribution / 时间分布"),
+        ]
+        for fname, caption in chart_files:
+            fpath = os.path.join(output_dir, fname)
+            if os.path.exists(fpath):
+                rel = os.path.relpath(fpath, output_dir)
+                html += f"""      <div>
+        <img src="{rel}" alt="{caption}">
+        <p style="text-align:center;color:#64748b;margin-top:8px;font-size:0.9em;">{caption}</p>
+      </div>
+"""
+
+        html += """    </div>
   </div>
 
   <div class="footer">
-    Generated at {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    Generated by ImageEnhancement-PyTorch | MSFE-Net Evaluation Platform<br>
+    Powered by PyTorch + OpenCV + NumPy
   </div>
+
 </div>
 </body>
 </html>"""
@@ -291,11 +602,13 @@ tr:hover {{ background:#f0f4ff; }}
         print(f"HTML report saved to: {path}")
         return path
 
+    # ---- JSON Report / JSON 报告 ----
     def _generate_json(self, output_dir: str) -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(output_dir, f"report_{timestamp}.json")
         report = {
             "timestamp": timestamp,
+            "language": LANG,
             "summary": self.summary(),
             "details": self.results,
         }
@@ -304,33 +617,38 @@ tr:hover {{ background:#f0f4ff; }}
         print(f"JSON report saved to: {path}")
         return path
 
+    # ---- Markdown Report / Markdown 报告 ----
     def _generate_markdown(self, output_dir: str) -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(output_dir, f"report_{timestamp}.md")
         summary = self.summary()
 
-        md = f"""# 图像质量增强评测报告
+        md = f"# {L.t('report_title')}\n\n"
+        md += f"**{L.t('generated_at')}**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-**生成时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        # Summary / 汇总
+        md += f"## {L.t('summary_title')}\n\n"
+        md += f"| {L.t('metric')} | {L.t('degraded_val')} | {L.t('enhanced_val')} | {L.t('gain')} |\n"
+        md += "|------|----------|----------|------|\n"
 
-## 总体指标
-
-| 指标 | 退化图像 | 增强图像 | 提升 |
-|------|----------|----------|------|
-"""
         improvements = summary.get("improvements_avg", {})
         for k in summary.get("degraded_avg", {}):
             d_val = summary["degraded_avg"][k]
             e_val = summary["enhanced_avg"].get(k, "-")
             gain = improvements.get(f"{k}_gain", "-")
-            md += f"| {k.upper()} | {d_val:.4f} | {e_val:.4f} | {gain}% |\n"
+            gain_str = f"{gain}%" if isinstance(gain, (int, float)) else gain
+            md += f"| {k.upper()} | {d_val:.4f} | {e_val:.4f} | {gain_str} |\n"
 
-        md += f"\n- 处理图像总数: {summary['total_images']}\n"
-        md += f"- 平均处理时间: {summary.get('avg_processing_time', 'N/A')}s\n"
+        md += f"\n- **{L.t('images_processed')}**: {summary.get('total_images', 0)}\n"
+        md += f"- **{L.t('avg_time')}**: {summary.get('avg_processing_time', 'N/A')}s\n"
 
-        md += "\n## 详细结果\n\n"
-        md += "| 图像 | 退化PSNR | 增强PSNR | 退化SSIM | 增强SSIM | PSNR提升 | SSIM提升 |\n"
+        # Details / 详细结果
+        md += f"\n## {L.t('detail_title')}\n\n"
+        md += f"| {L.t('image_name')} | {L.t('degraded_psnr')} | {L.t('enhanced_psnr')} | "
+        md += f"{L.t('degraded_ssim')} | {L.t('enhanced_ssim')} | "
+        md += f"{L.t('psnr_gain_col')} | {L.t('ssim_gain_col')} |\n"
         md += "|------|----------|----------|----------|----------|----------|----------|\n"
+
         for r in self.results:
             if "error" in r:
                 md += f"| {r.get('name','?')} | Error | | | | | |\n"
@@ -338,16 +656,19 @@ tr:hover {{ background:#f0f4ff; }}
             md_ = r["metrics_degraded"]
             me_ = r["metrics_enhanced"]
             imp_ = r.get("improvements", {})
-            md += f"| {r['name']} | {md_.get('psnr',0):.2f} | {me_.get('psnr',0):.2f} | {md_.get('ssim',0):.4f} | {me_.get('ssim',0):.4f} | {imp_.get('psnr_gain',0)}% | {imp_.get('ssim_gain',0)}% |\n"
+            md += (f"| {r['name']} | {md_.get('psnr',0):.2f} | {me_.get('psnr',0):.2f} | "
+                   f"{md_.get('ssim',0):.4f} | {me_.get('ssim',0):.4f} | "
+                   f"{imp_.get('psnr_gain',0)}% | {imp_.get('ssim_gain',0)}% |\n")
 
         with open(path, 'w', encoding='utf-8') as f:
             f.write(md)
         print(f"Markdown report saved to: {path}")
         return path
 
-    # -------------------- 对比图保存 --------------------
+    # -------------------- Comparison Images / 对比图保存 --------------------
     def save_comparisons(self, output_dir: str = None) -> List[str]:
-        """保存原始/退化/增强三者对比图"""
+        """Save original/degraded/enhanced comparison images
+        保存原始/退化/增强三者对比图"""
         output_dir = output_dir or os.path.join(RESULTS_DIR, "comparisons")
         os.makedirs(output_dir, exist_ok=True)
         saved = []
@@ -371,14 +692,22 @@ tr:hover {{ background:#f0f4ff; }}
                 enhanced = degraded
 
             h, w = img.shape[:2]
-            # 拼接: 原图 | 退化 | 增强
+            # Concatenate: Original | Degraded | Enhanced / 拼接: 原图 | 退化 | 增强
             comparison = np.hstack([img, degraded, enhanced])
 
-            # 添加文字标注
+            # Add labels / 添加文字标注
             font = cv2.FONT_HERSHEY_SIMPLEX
-            for i, label in enumerate(["Original", "Degraded", "Enhanced"]):
+            labels_en = ["Original", "Degraded", "Enhanced"]
+            labels_zh = ["原始", "退化", "增强"]
+            labels = labels_zh if LANG == "zh" else labels_en
+
+            for i, label in enumerate(labels):
                 x = int(w * i + w * 0.05)
-                cv2.putText(comparison, label, (x, 30), font, 0.7,
+                # Background rect for readability / 背景矩形提高可读性
+                (tw, th), _ = cv2.getTextSize(label, font, 0.7, 2)
+                cv2.rectangle(comparison, (x - 5, 10 - th - 5),
+                             (x + tw + 5, 30), (0, 0, 0), -1)
+                cv2.putText(comparison, label, (x, 28), font, 0.7,
                             (255, 255, 255), 2, cv2.LINE_AA)
 
             out_path = os.path.join(output_dir, f"cmp_{r['name']}.jpg")
